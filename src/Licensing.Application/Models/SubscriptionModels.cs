@@ -32,7 +32,8 @@ public record SubscriptionDetailDto(
     Guid? CurrentLicenseId,
     string? MetadataJson,
     TimeSpan Remaining,
-    IReadOnlyList<SubscriptionRenewalDto> Renewals);
+    IReadOnlyList<SubscriptionRenewalDto> Renewals,
+    IReadOnlyList<SubscriptionStatusHistoryDto> StatusHistory);
 
 public record SubscriptionListItemDto(
     Guid Id,
@@ -55,6 +56,14 @@ public record SubscriptionRenewalDto(
     DateTime RenewedAtUtc,
     string? RenewedBy,
     string? Notes);
+
+public record SubscriptionStatusHistoryDto(
+    Guid Id,
+    string FromStatus,
+    string ToStatus,
+    string? Reason,
+    string? ChangedBy,
+    DateTime ChangedAtUtc);
 
 public record SubscriptionQuery(
     int Page = 1,

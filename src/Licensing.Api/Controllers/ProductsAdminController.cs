@@ -34,6 +34,13 @@ public class ProductsAdminController : ControllerBase
         return NoContent();
     }
 
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
+    {
+        await _catalogAdmin.DeleteProductAsync(id, cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet("{productId:guid}/features")]
     public async Task<IActionResult> Features(Guid productId, CancellationToken cancellationToken) =>
         Ok(await _catalog.GetProductFeaturesAsync(productId, cancellationToken));
@@ -49,6 +56,13 @@ public class ProductsAdminController : ControllerBase
         return NoContent();
     }
 
+    [HttpDelete("features/{featureId:guid}")]
+    public async Task<IActionResult> DeleteFeature(Guid featureId, CancellationToken cancellationToken)
+    {
+        await _catalogAdmin.DeleteFeatureAsync(featureId, cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet("{productId:guid}/plans")]
     public async Task<IActionResult> Plans(Guid productId, CancellationToken cancellationToken) =>
         Ok(await _catalog.GetPlansAsync(productId, cancellationToken));
@@ -61,6 +75,13 @@ public class ProductsAdminController : ControllerBase
     public async Task<IActionResult> UpdatePlan(Guid planId, [FromBody] UpdatePlanRequest request, CancellationToken cancellationToken)
     {
         await _catalogAdmin.UpdatePlanAsync(planId, request, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpDelete("plans/{planId:guid}")]
+    public async Task<IActionResult> DeletePlan(Guid planId, CancellationToken cancellationToken)
+    {
+        await _catalogAdmin.DeletePlanAsync(planId, cancellationToken);
         return NoContent();
     }
 

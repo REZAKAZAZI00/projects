@@ -17,6 +17,7 @@ public interface ILicensingDbContext
     DbSet<LicenseActivation> LicenseActivations { get; }
     DbSet<LicenseStatusHistory> LicenseStatusHistories { get; }
     DbSet<SubscriptionRenewal> SubscriptionRenewals { get; }
+    DbSet<SubscriptionStatusHistory> SubscriptionStatusHistories { get; }
     DbSet<LicenseAuditLog> LicenseAuditLogs { get; }
     DbSet<AdminUser> AdminUsers { get; }
 

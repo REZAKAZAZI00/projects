@@ -20,6 +20,7 @@ public class LicensingDbContext : DbContext, ILicensingDbContext
     public DbSet<LicenseActivation> LicenseActivations => Set<LicenseActivation>();
     public DbSet<LicenseStatusHistory> LicenseStatusHistories => Set<LicenseStatusHistory>();
     public DbSet<SubscriptionRenewal> SubscriptionRenewals => Set<SubscriptionRenewal>();
+    public DbSet<SubscriptionStatusHistory> SubscriptionStatusHistories => Set<SubscriptionStatusHistory>();
     public DbSet<LicenseAuditLog> LicenseAuditLogs => Set<LicenseAuditLog>();
     public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
 

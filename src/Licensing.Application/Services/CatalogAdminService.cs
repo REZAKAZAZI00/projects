@@ -49,8 +49,23 @@ public class CatalogAdminService
         await _db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task DeleteProductAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted, cancellationToken)
+            ?? throw new NotFoundException("Product not found.");
+
+        if (await _db.Licenses.AnyAsync(l => l.ProductId == id && !l.IsDeleted, cancellationToken))
+            throw new ConflictException("Products with licenses cannot be deleted.");
+
+        product.IsActive = false;
+        product.IsDeleted = true;
+        product.UpdatedAtUtc = _clock.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<PlanDto> CreatePlanAsync(Guid productId, CreatePlanRequest request, CancellationToken cancellationToken = default)
     {
+        ValidatePlanValues(request.DefaultMaxActivations, request.DefaultDurationDays);
         var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == productId && !p.IsDeleted, cancellationToken)
             ?? throw new NotFoundException("Product not found.");
 
@@ -80,11 +95,28 @@ public class CatalogAdminService
         var plan = await _db.Plans.FirstOrDefaultAsync(p => p.Id == planId, cancellationToken)
             ?? throw new NotFoundException("Plan not found.");
 
+        if (request.DefaultMaxActivations.HasValue || request.DefaultDurationDays.HasValue)
+            ValidatePlanValues(request.DefaultMaxActivations ?? plan.DefaultMaxActivations, request.DefaultDurationDays);
+
         if (request.Name is not null) plan.Name = request.Name;
         if (request.Description is not null) plan.Description = request.Description;
         if (request.DefaultMaxActivations.HasValue) plan.DefaultMaxActivations = request.DefaultMaxActivations.Value;
         if (request.DefaultDurationDays.HasValue) plan.DefaultDurationDays = request.DefaultDurationDays;
         if (request.IsActive.HasValue) plan.IsActive = request.IsActive.Value;
+        plan.UpdatedAtUtc = _clock.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeletePlanAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var plan = await _db.Plans.FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted, cancellationToken)
+            ?? throw new NotFoundException("Plan not found.");
+
+        if (await _db.Licenses.AnyAsync(l => l.PlanId == id && !l.IsDeleted, cancellationToken))
+            throw new ConflictException("Plans with licenses cannot be deleted.");
+
+        plan.IsActive = false;
+        plan.IsDeleted = true;
         plan.UpdatedAtUtc = _clock.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
     }
@@ -125,6 +157,21 @@ public class CatalogAdminService
         await _db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task DeleteFeatureAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var feature = await _db.ProductFeatures.FirstOrDefaultAsync(f => f.Id == id && !f.IsDeleted, cancellationToken)
+            ?? throw new NotFoundException("Feature not found.");
+
+        if (await _db.LicenseFeatures.AnyAsync(lf => lf.ProductFeatureId == id, cancellationToken) ||
+            await _db.PlanFeatures.AnyAsync(pf => pf.ProductFeatureId == id, cancellationToken))
+            throw new ConflictException("Features assigned to a plan or license cannot be deleted.");
+
+        feature.IsActive = false;
+        feature.IsDeleted = true;
+        feature.UpdatedAtUtc = _clock.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task SetPlanFeaturesAsync(Guid planId, SetPlanFeaturesRequest request, CancellationToken cancellationToken = default)
     {
         var plan = await _db.Plans.Include(p => p.PlanFeatures).FirstOrDefaultAsync(p => p.Id == planId, cancellationToken)
@@ -150,5 +197,14 @@ public class CatalogAdminService
 
         plan.UpdatedAtUtc = _clock.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void ValidatePlanValues(int maxActivations, int? durationDays)
+    {
+        if (maxActivations < 1)
+            throw new ValidationException("Default max activations must be at least 1.");
+
+        if (durationDays.HasValue && durationDays.Value < 1)
+            throw new ValidationException("Default duration days must be at least 1.");
     }
 }

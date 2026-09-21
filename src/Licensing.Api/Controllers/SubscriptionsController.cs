@@ -30,6 +30,10 @@ public class SubscriptionsController : ControllerBase
         return item is null ? NotFound(new { error = "Subscription not found." }) : Ok(item);
     }
 
+    [HttpGet("{id:guid}/history")]
+    public async Task<IActionResult> History(Guid id, CancellationToken cancellationToken) =>
+        Ok(await _subscriptionService.GetHistoryAsync(id, cancellationToken));
+
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] SubscriptionQuery query, CancellationToken cancellationToken) =>
         Ok(await _subscriptionService.ListAsync(query, cancellationToken));
