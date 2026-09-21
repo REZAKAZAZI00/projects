@@ -1,0 +1,13 @@
+services:
+  mariadb:
+    image: mariadb:10.11
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: LicensingDb
+    ports:
+      - "3306:3306"
+    volumes:
+      - licensing_db_data:/var/lib/mysql
+
+volumes:
+  licensing_db_data:
