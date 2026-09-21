@@ -229,6 +229,9 @@ public class LicenseService
         if (license.Status is LicenseStatus.Revoked or LicenseStatus.Suspended or LicenseStatus.Expired)
             throw new ConflictException($"License is not usable. Status: {license.Status}");
 
+        if (license.ValidFromUtc.HasValue && license.ValidFromUtc.Value > _clock.UtcNow)
+            throw new ConflictException("License is not active yet.");
+
         if (license.Status == LicenseStatus.Pending)
         {
             await _lifecycle.ChangeStatusAsync(license, LicenseStatus.Active, "Client", "First activation", cancellationToken);
@@ -327,6 +330,7 @@ public class LicenseService
         }
 
         var isValid = license.Status == LicenseStatus.Active &&
+                      (!license.ValidFromUtc.HasValue || license.ValidFromUtc.Value <= _clock.UtcNow) &&
                       license.ExpirationDateUtc > _clock.UtcNow &&
                       (string.IsNullOrWhiteSpace(request.InstanceIdentifier) || activation is not null);
 
@@ -348,6 +352,7 @@ public class LicenseService
                 LicenseStatus.Suspended => "License is suspended.",
                 LicenseStatus.Revoked => "License is revoked.",
                 LicenseStatus.Expired => "License has expired.",
+                _ when license.ValidFromUtc.HasValue && license.ValidFromUtc.Value > _clock.UtcNow => "License is not active yet.",
                 LicenseStatus.Pending => "License is not activated yet.",
                 _ when license.ExpirationDateUtc <= _clock.UtcNow => "License has expired.",
                 _ when activation is null && !string.IsNullOrWhiteSpace(request.InstanceIdentifier) => "Instance is not activated.",
@@ -447,6 +452,12 @@ public class LicenseService
         if (request.ExpirationDateUtc <= _clock.UtcNow)
             throw new ValidationException("Expiration date must be in the future (UTC).");
 
+        if (request.ValidFromUtc.HasValue && request.ValidFromUtc.Value >= request.ExpirationDateUtc)
+            throw new ValidationException("Valid-from date must be before expiration date.");
+
+        if (request.ActivateImmediately && request.ValidFromUtc.HasValue && request.ValidFromUtc.Value > _clock.UtcNow)
+            throw new ValidationException("A license cannot be activated before its valid-from date.");
+
         if (request.MaxActivations < 1)
             throw new ValidationException("Max activations must be at least 1.");
 
@@ -495,7 +506,7 @@ public class LicenseService
                 var productFeature = await _db.ProductFeatures
                     .FirstOrDefaultAsync(f => f.ProductId == license.ProductId && f.FeatureKey == feature.FeatureKey, cancellationToken);
                 if (productFeature is null)
-                    continue;
+                    throw new ValidationException($"Unknown feature: {feature.FeatureKey}");
 
                 var existing = license.LicenseFeatures.FirstOrDefault(lf => lf.ProductFeatureId == productFeature.Id);
                 if (existing is null)
@@ -517,6 +528,7 @@ public class LicenseService
         }
 
         var limits = request.Limits ?? new List<LicenseLimitInput>();
+        ValidateLimits(limits);
         foreach (var limit in limits)
         {
             license.LicenseLimits.Add(new LicenseLimit
@@ -553,6 +565,7 @@ public class LicenseService
 
     private static void ReplaceLicenseLimits(License license, IReadOnlyList<LicenseLimitInput> limits)
     {
+        ValidateLimits(limits);
         license.LicenseLimits.Clear();
         foreach (var limit in limits)
         {
@@ -564,6 +577,19 @@ public class LicenseService
                 LimitValue = limit.LimitValue,
                 Unit = limit.Unit
             });
+        }
+    }
+
+    private static void ValidateLimits(IReadOnlyList<LicenseLimitInput> limits)
+    {
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var limit in limits)
+        {
+            if (string.IsNullOrWhiteSpace(limit.LimitKey))
+                throw new ValidationException("Limit key is required.");
+
+            if (!keys.Add(limit.LimitKey.Trim()))
+                throw new ValidationException($"Duplicate limit: {limit.LimitKey}");
         }
     }
 

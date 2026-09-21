@@ -20,5 +20,6 @@ public class Subscription : EntityBase
     public Plan Plan { get; set; } = null!;
     public License? CurrentLicense { get; set; }
     public ICollection<SubscriptionRenewal> Renewals { get; set; } = new List<SubscriptionRenewal>();
+    public ICollection<SubscriptionStatusHistory> StatusHistory { get; set; } = new List<SubscriptionStatusHistory>();
     public ICollection<License> Licenses { get; set; } = new List<License>();
 }

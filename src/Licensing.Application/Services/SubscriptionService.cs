@@ -47,8 +47,10 @@ public class SubscriptionService
         };
 
         _db.Subscriptions.Add(subscription);
+        AddStatusHistory(subscription, SubscriptionStatus.Trial, subscription.Status, "Subscription created", actor);
         await _audit.LogAsync(AuditActionType.SubscriptionCreated, null, subscription.CustomerId, actor, ip,
             new { subscription.Id, subscription.PlanId }, cancellationToken: cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
 
         if (request.CreateLicense)
         {
@@ -85,6 +87,7 @@ public class SubscriptionService
             .Include(s => s.Product)
             .Include(s => s.Plan)
             .Include(s => s.Renewals)
+            .Include(s => s.StatusHistory)
             .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted, cancellationToken);
 
         return subscription is null ? null : MapDetail(subscription);
@@ -133,9 +136,11 @@ public class SubscriptionService
             throw new ConflictException("Cancelled subscriptions cannot be renewed.");
 
         var previous = subscription.ExpirationDateUtc;
+        var previousStatus = subscription.Status;
         subscription.ExpirationDateUtc = request.NewExpirationDateUtc;
         subscription.Status = SubscriptionStatus.Active;
         subscription.UpdatedAtUtc = _clock.UtcNow;
+        AddStatusHistory(subscription, previousStatus, subscription.Status, "Subscription renewed", actor);
 
         _db.SubscriptionRenewals.Add(new SubscriptionRenewal
         {
@@ -174,13 +179,20 @@ public class SubscriptionService
             .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted, cancellationToken)
             ?? throw new NotFoundException("Subscription not found.");
 
+        var previousStatus = subscription.Status;
         subscription.Status = SubscriptionStatus.Cancelled;
         subscription.UpdatedAtUtc = _clock.UtcNow;
+        AddStatusHistory(subscription, previousStatus, subscription.Status, reason ?? "Subscription cancelled", actor);
 
         if (subscription.CurrentLicenseId.HasValue)
             await _lifecycle.RevokeAsync(subscription.CurrentLicenseId.Value, actor, reason ?? "Subscription cancelled", ip, cancellationToken);
         else
             await _db.SaveChangesAsync(cancellationToken);
+
+        await _audit.LogAsync(AuditActionType.SubscriptionCancelled, subscription.CurrentLicenseId,
+            subscription.CustomerId, actor, ip,
+            new { subscription.Id, reason }, cancellationToken: cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task SetGracePeriodAsync(Guid id, int graceDays, string actor, string? ip, CancellationToken cancellationToken = default)
@@ -192,9 +204,35 @@ public class SubscriptionService
             .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted, cancellationToken)
             ?? throw new NotFoundException("Subscription not found.");
 
+        if (subscription.Status == SubscriptionStatus.Cancelled)
+            throw new ConflictException("Cancelled subscriptions cannot enter a grace period.");
+
+        var previousStatus = subscription.Status;
         subscription.Status = SubscriptionStatus.GracePeriod;
-        subscription.ExpirationDateUtc = _clock.UtcNow.AddDays(graceDays);
+        var graceExpiration = _clock.UtcNow.AddDays(graceDays);
+        subscription.ExpirationDateUtc = graceExpiration;
         subscription.UpdatedAtUtc = _clock.UtcNow;
+        AddStatusHistory(subscription, previousStatus, subscription.Status, "Subscription grace period started", actor);
+
+        if (subscription.CurrentLicenseId.HasValue)
+        {
+            await _lifecycle.RenewAsync(
+                subscription.CurrentLicenseId.Value,
+                graceExpiration,
+                actor,
+                "Subscription grace period started",
+                ip,
+                syncLinkedSubscription: false,
+                cancellationToken);
+        }
+        else
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        await _audit.LogAsync(AuditActionType.SubscriptionGracePeriodStarted, subscription.CurrentLicenseId,
+            subscription.CustomerId, actor, ip,
+            new { subscription.Id, graceDays, graceExpiration }, cancellationToken: cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
     }
 
@@ -210,8 +248,10 @@ public class SubscriptionService
 
         foreach (var sub in expired)
         {
+            var previousStatus = sub.Status;
             sub.Status = SubscriptionStatus.Expired;
             sub.UpdatedAtUtc = now;
+            AddStatusHistory(sub, previousStatus, sub.Status, "Subscription expired", "System");
             if (sub.CurrentLicenseId.HasValue)
             {
                 var license = await _db.Licenses.FirstOrDefaultAsync(l => l.Id == sub.CurrentLicenseId.Value, cancellationToken);
@@ -222,6 +262,25 @@ public class SubscriptionService
 
         if (expired.Count > 0)
             await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SubscriptionStatusHistoryDto>> GetHistoryAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var exists = await _db.Subscriptions.AnyAsync(s => s.Id == id && !s.IsDeleted, cancellationToken);
+        if (!exists)
+            throw new NotFoundException("Subscription not found.");
+
+        return await _db.SubscriptionStatusHistories.AsNoTracking()
+            .Where(h => h.SubscriptionId == id)
+            .OrderByDescending(h => h.ChangedAtUtc)
+            .Select(h => new SubscriptionStatusHistoryDto(
+                h.Id,
+                h.FromStatus.ToString(),
+                h.ToStatus.ToString(),
+                h.Reason,
+                h.ChangedBy,
+                h.ChangedAtUtc))
+            .ToListAsync(cancellationToken);
     }
 
     private async Task ValidateSubscriptionRequestAsync(CreateSubscriptionRequest request, CancellationToken cancellationToken)
@@ -268,5 +327,22 @@ public class SubscriptionService
         s.ExpirationDateUtc - _clock.UtcNow,
         s.Renewals.OrderByDescending(r => r.RenewedAtUtc)
             .Select(r => new SubscriptionRenewalDto(r.Id, r.PreviousExpirationUtc, r.NewExpirationUtc, r.RenewedAtUtc, r.RenewedBy, r.Notes))
+            .ToList(),
+        s.StatusHistory.OrderByDescending(h => h.ChangedAtUtc)
+            .Select(h => new SubscriptionStatusHistoryDto(h.Id, h.FromStatus.ToString(), h.ToStatus.ToString(), h.Reason, h.ChangedBy, h.ChangedAtUtc))
             .ToList());
+
+    private void AddStatusHistory(Subscription subscription, SubscriptionStatus fromStatus, SubscriptionStatus toStatus, string reason, string changedBy)
+    {
+        _db.SubscriptionStatusHistories.Add(new SubscriptionStatusHistory
+        {
+            Id = Guid.NewGuid(),
+            SubscriptionId = subscription.Id,
+            FromStatus = fromStatus,
+            ToStatus = toStatus,
+            Reason = reason,
+            ChangedBy = changedBy,
+            ChangedAtUtc = _clock.UtcNow
+        });
+    }
 }

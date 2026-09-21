@@ -21,7 +21,7 @@ public class CatalogService
 
     public async Task<IReadOnlyList<PlanDto>> GetPlansAsync(Guid? productId, CancellationToken cancellationToken = default)
     {
-        var q = _db.Plans.AsNoTracking().Where(p => p.IsActive);
+        var q = _db.Plans.AsNoTracking().Where(p => p.IsActive && !p.IsDeleted);
         if (productId.HasValue)
             q = q.Where(p => p.ProductId == productId.Value);
 

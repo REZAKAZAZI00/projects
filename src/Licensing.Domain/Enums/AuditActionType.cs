@@ -14,5 +14,7 @@ public enum AuditActionType
     LicenseExpired = 9,
     SubscriptionCreated = 10,
     SubscriptionRenewed = 11,
-    UnauthorizedAccess = 12
+    SubscriptionCancelled = 12,
+    SubscriptionGracePeriodStarted = 13,
+    UnauthorizedAccess = 14
 }

@@ -139,6 +139,18 @@ public class SubscriptionRenewalConfiguration : IEntityTypeConfiguration<Subscri
     }
 }
 
+public class SubscriptionStatusHistoryConfiguration : IEntityTypeConfiguration<SubscriptionStatusHistory>
+{
+    public void Configure(EntityTypeBuilder<SubscriptionStatusHistory> builder)
+    {
+        builder.ToTable("SubscriptionStatusHistory");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.FromStatus).HasConversion<int>();
+        builder.Property(x => x.ToStatus).HasConversion<int>();
+        builder.HasIndex(x => new { x.SubscriptionId, x.ChangedAtUtc });
+    }
+}
+
 public class LicenseAuditLogConfiguration : IEntityTypeConfiguration<LicenseAuditLog>
 {
     public void Configure(EntityTypeBuilder<LicenseAuditLog> builder)
